@@ -1,103 +1,19 @@
-"""
-kalman_v11_omega_meas.py
-====================================================================
-會議修正版的 6-state 閉迴路 steering 模型 (v11: 感官雜訊移到量測層)。
 
-相對於 v10 的關鍵改動 (2026-07 與 Bonnie 討論後定案):
-
-  ★ 感官雜訊 ω 的擺法 (最終版, 讀法 A + 自負猴子):
-      - 真值 x 保持乾淨的物理量:  x_true = T - H  (不含 ω)
-      - 猴子讀到的量測才帶感官雜訊:  z = (T - H) + ω,  ω ~ N(0, σ_ω²)
-      - filter 相信自己感官很精準:  R → 0 (極小值), 幾乎全信量測
-      → 結果: x̂ ≈ z = (T-H)+ω, 即「估計值 = 乾淨真值 + 感官雜訊」
-         (這正是 Bonnie 要的: 真值可畫乾淨線, 估計線帶感官抖動)
-      感官雜訊只注入一次 (量測那一刻), 不再在真值層重複加。
-      科學宣稱: 猴子客觀感官有雜訊 ω, 但主觀上自負、不校正 (non-Bayesian,
-         R→0), 會把每個帶雜訊的讀數當真、追逐雜訊。
-
-  A1'. process noise Q 不再吃世界雜訊 qT:
-      T 的 random-walk 擾動是「世界」的事 (上帝視角看得到的物理真值),
-      不是猴子感官的雜訊, 概念上分開。Q[x,x] 不再手動繼承 qT。
-      T 仍是外生 random-walk 目標; Q[T,T]=qT 保留 (filter 需知 T 會漂移
-      才能把 T 當隱藏變數推斷), 但這是「世界漂移」不是「感官雜訊」。
-
-  A2. 把 g 從 Φ 第 6 列抽出來，改寫成控制輸入 u：
-          state_{k+1} = Φ · state_k + B u_k + (noise)
-      u_k 是猴子下給 motor 的命令。目前 u 只是「含 g 的佔位版」，
-      維持與舊模型等價的閉迴路行為 (u = g · x̂ 灌進 r'')；
-      下一輪會換成 LQR/Riccati 解出的 u = -K x̂。
-      → Φ 現在只描述「被動物理演化」，u 才是可被最佳化的主體。
-
---------------------------------------------------------------------
-狀態順序: state = [T, H, x, r, r', r'']
-  T   目標位置 (世界座標, random walk)
-  H   整合後的 response 朝向   (H += dt · r)
-  x   猴子感知到的 steering error = (T - H) + 感官雜訊 ω
-  r   response
-  r'  角速度
-  r'' 角加速度 (由 motor 命令 u 驅動)
-單位: 位置類 deg; P 對角 deg²。
-====================================================================
-"""
+from config import *
 import numpy as np
-# ----------------------------------------------------------------- 參數
-fs = 10.6
-dt = 1.0 / fs
-N  = 220
-g, k_s, b = 6.0, 6.0, 3.2
-T_, H_, x_, r_, rp_, rpp_ = range(6)
-n = 6
-# ----------------------------------------------------------------- 被動動態 Φ
-# 關鍵改動 (A2): 第 6 列 (r'') 不再含 g。
-# 舊: [0,0, g, -k_s, -b, 0]  ->  新: [0,0, 0, -k_s, -b, 0]
-# g 這個「猴子把感知誤差轉成加速度命令」的環節，移到控制輸入 u 裡。
-Phi = np.array([
-    [1,  0, 0,  0,   0,  0],   # T: random walk (外生世界)
-    [0,  1, 0, dt,   0,  0],   # H += dt·r
-    [1, -1, 0,  0,   0,  0],   # x = T - H  (稍後再疊加感官雜訊 ω)
-    [0,  0, 0,  1,  dt,  0],   # r += dt·r'
-    [0,  0, 0,  0,   1, dt],   # r' += dt·r''
-    [0,  0, 0,-k_s, -b,  0],   # r'' = -k_s·r - b·r'  (+ 控制 u，見下)
-], float)
-# ----------------------------------------------------------------- 雜訊設定
-# (1) 世界擾動: T 是 random walk，方差 σ_T² · dt (與舊版一致)
-sigma_T2 = 5.68            # deg²  (per unit time)
-qT = sigma_T2 * dt         # 每步 T 的 process variance
-
-# (2) 感官雜訊 ω: 只作用在 x，代表猴子感官的 steering-error 雜訊
-sigma_x = 0.30             # deg   (感官雜訊標準差；baseline，可掃描)
-qx = sigma_x**2            # deg²
-
-# v11 改動: 感官雜訊 ω 已移到量測層，不再進 Q。
-# Q[x,x] 不再手動繼承 qT/qx；T 的擾動是世界的事，會透過真值 x=T-H
-# 自然反映，但那不是「猴子感官的 noise」。Q[T,T]=qT 保留 (filter 需
-# 知 T 會漂移才能把 T 當隱藏變數推斷)，但這是「世界漂移」不是感官雜訊。
-Q = np.zeros((n, n))
-Q[T_, T_]   = qT          # 世界漂移 (filter 需知 T 會動)，非感官雜訊
-Q[x_, x_]   = 1e-6        # 極小 regularizer (x 不再手動繼承任何雜訊)
-Q[rpp_, rpp_] = 1e-4       # 極小 regularizer，避免奇異
-
-# ----------------------------------------------------------------- 量測
-# A1: 猴子只「看」steering error x（帶感官雜訊）。
-# 量測方程直接量 x（H 不再是被量測的 sensor）。
-# v11: 感官雜訊 ω 在量測那一刻注入 (z = x_true + ω, σ_ω² = qx)。
-# R (filter 內部信念) → 極小: 自負猴子以為感官完美，K_x→1，x̂ ≈ z。
-# R ≠ 真實 ω 方差，這正是「客觀有雜訊但主觀不知」的 non-Bayesian 宣稱。
-H_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
-sigma_omega2 = qx                                 # 真實感官雜訊方差 (進量測)
-R = np.array([[1e-6]])                             # filter 信念: 自負猴子 R→0
-I = np.eye(n)
+from behavior import *
 
 def main():
     # 先重現 v7 佔位版 (kx=g=6) 當健全性檢查
-    b6 = behavior(6.0)
+
+    b6 = behavior()
     print("=== 健全性檢查: kx=6 (佔位版, 應 = v7 的 2.597) ===")
     print("  真實 x RMS :", round(b6["true_x_rms"], 3),
           "| mean|u| :", round(b6["mean_abs_u"], 3))
 
-    Rc = 1.0
+    
     kx_grid = np.linspace(0.2, 20.0, 100)
-    Jvals = np.array([lqr_cost(kx, Rc) for kx in kx_grid])
+    Jvals = np.array([lqr_cost() for kx in kx_grid])
     best_i = int(np.argmin(Jvals))
     kx_star = kx_grid[best_i]
 
@@ -109,16 +25,15 @@ def main():
         print(f"  kx = {kx:6.3f} -> J = {lqr_cost(kx, Rc):12.1f}")
 
     print("\n--- 最佳 kx* 行為 vs 佔位版 kx=6 ---")
-    bs = behavior(kx_star)
+    bs = behavior(kx_star, n)
     print(f"  kx*={kx_star:.2f}:  真實 x RMS = {bs['true_x_rms']:.3f} deg, "
           f"mean|u| = {bs['mean_abs_u']:.3f}")
     print(f"  kx =6.00 :  真實 x RMS = {b6['true_x_rms']:.3f} deg, "
           f"mean|u| = {b6['mean_abs_u']:.3f}")
 
-    np.savez("/home/user/workspace/lqr_kx_sweep.npz",
+    np.savez("./lqr_kx_sweep_from_mainFile.npz",
              kx=kx_grid, J=Jvals, kx_star=kx_star, Rc=Rc)
     print("\n[saved] lqr_kx_sweep.npz")
 
 if __name__ == "__main__":
-    
     main()

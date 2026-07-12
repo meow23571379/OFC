@@ -216,7 +216,7 @@ def main():
     print(f"  kx =6.00 :  真實 x RMS = {b6['true_x_rms']:.3f} deg, "
           f"mean|u| = {b6['mean_abs_u']:.3f}")
 
-    np.savez("/home/user/workspace/lqr_kx_sweep.npz",
+    np.savez("./lqr_kx_sweep.npz",
              kx=kx_grid, J=Jvals, kx_star=kx_star, Rc=Rc)
     print("\n[saved] lqr_kx_sweep.npz")
 
