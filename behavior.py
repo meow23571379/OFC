@@ -10,12 +10,19 @@ def simulate(kx=6, seed=3, return_traces=True):
     control_u = lambda xhat: A @ xhat
     
 
-    xt   = np.zeros((N, n)); xt[0, T_] = 5.0; xt[0, x_] = 5.0
-    xhat = np.zeros(n);      xhat[T_] = 5.0;  xhat[x_] = 5.0
+    xt   = np.zeros((N, n))
+    xt[0, T_] = 5.0 # 一開始答案在5而且猴子距離答案有5單位遠
+    xt[0, x_] = 5.0
+    xhat = np.zeros(n)
+    xhat[T_] = 5.0
+    xhat[x_] = 5.0
     P    = np.diag([sigma_T2, 1., 1., 1., 1., 1.])
 
-    est = np.zeros((N, n)); tru = np.zeros((N, n))
-    Kh  = np.zeros((N, n)); Ptr = np.zeros(N); Pxx = np.zeros(N)
+    est = np.zeros((N, n))
+    tru = np.zeros((N, n))
+    Kh  = np.zeros((N, n))
+    Ptr = np.zeros(N)
+    Pxx = np.zeros(N)
     Utrace = np.zeros(N)
 
     for k in range(N):
@@ -35,14 +42,17 @@ def simulate(kx=6, seed=3, return_traces=True):
         # -------- Kalman 量測更新 (量 x) ---------------------------
         # v11: 感官雜訊 ω 在這裡注入 (用真實 σ_ω²)，但 filter 內部用 R→0。
         omega = np.sqrt(sigma_omega2) * rng.standard_normal(1)
-        z = H_meas @ xt[k] + omega
-        S = H_meas @ P @ H_meas.T + R
-        K = (P @ H_meas.T @ np.linalg.inv(S)).ravel()
-        xhat = xhat + K * (z - H_meas @ xhat)
-        P = (I - np.outer(K, H_meas.ravel())) @ P
+        z = x_meas @ xt[k] + omega
+        S = x_meas @ P @ x_meas.T + R
+        K = (P @ x_meas.T @ np.linalg.inv(S)).ravel()
+        xhat = xhat + K * (z - x_meas @ xhat)
+        P = (I - np.outer(K, x_meas.ravel())) @ P
 
-        est[k] = xhat; tru[k] = xt[k]
-        Kh[k] = K; Ptr[k] = np.trace(P); Pxx[k] = P[x_, x_]
+        est[k] = xhat
+        tru[k] = xt[k]
+        Kh[k] = K
+        Ptr[k] = np.trace(P)
+        Pxx[k] = P[x_, x_]
 
         # -------- Kalman 時間更新 (預測) ---------------------------
         xhat = Phi @ xhat + control_u(xhat)
@@ -55,7 +65,9 @@ def simulate(kx=6, seed=3, return_traces=True):
 
 def behavior(kx=kx, seed=3):
     d = simulate(kx=kx, seed=seed)
-    tru = d["tru"]; est = d["est"]; U = d["U"]
+    tru = d["tru"]
+    est = d["est"]
+    U = d["U"]
     resid = est[:, x_] - tru[:, x_]
     return dict(true_x_rms=np.sqrt(np.mean(tru[:, x_]**2)),
                 resid_rms=np.sqrt(np.mean(resid**2)),

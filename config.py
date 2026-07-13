@@ -88,7 +88,7 @@ Q[rpp_, rpp_] = 1e-4       # 極小 regularizer，避免奇異
 # v11: 感官雜訊 ω 在量測那一刻注入 (z = x_true + ω, σ_ω² = qx)。
 # R (filter 內部信念) → 極小: 自負猴子以為感官完美，K_x→1，x̂ ≈ z。
 # R ≠ 真實 ω 方差，這正是「客觀有雜訊但主觀不知」的 non-Bayesian 宣稱。
-H_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
+x_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
 sigma_omega2 = qx                                 # 真實感官雜訊方差 (進量測)
 R = np.array([[1e-6]])                             # filter 信念: 自負猴子 R→0
 I = np.eye(n)
