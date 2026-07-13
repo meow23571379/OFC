@@ -104,7 +104,7 @@ Q[rpp_, rpp_] = 1e-4       # 極小 regularizer，避免奇異
 # v11: 感官雜訊 ω 在量測那一刻注入 (z = x_true + ω, σ_ω² = qx)。
 # R (filter 內部信念) → 極小: 自負猴子以為感官完美，K_x→1，x̂ ≈ z。
 # R ≠ 真實 ω 方差，這正是「客觀有雜訊但主觀不知」的 non-Bayesian 宣稱。
-H_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
+x_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
 sigma_omega2 = qx                                 # 真實感官雜訊方差 (進量測)
 R = np.array([[1e-6]])                             # filter 信念: 自負猴子 R→0
 
@@ -143,11 +143,13 @@ def simulate(kx=g, seed=3, return_traces=True):
         # -------- Kalman 量測更新 (量 x) ---------------------------
         # v11: 感官雜訊 ω 在這裡注入 (用真實 σ_ω²)，但 filter 內部用 R→0。
         omega = np.sqrt(sigma_omega2) * rng.standard_normal(1)
-        z = H_meas @ xt[k] + omega
-        S = H_meas @ P @ H_meas.T + R
-        K = (P @ H_meas.T @ np.linalg.inv(S)).ravel()
-        xhat = xhat + K * (z - H_meas @ xhat)
-        P = (I - np.outer(K, H_meas.ravel())) @ P
+        z = x_meas @ xt[k] + omega
+        S = x_meas @ P @ x_meas.T + R
+        K = (P @ x_meas.T @ np.linalg.inv(S)).ravel()
+        # xhat = xhat + K * (z - x_meas @ xhat)
+
+        xhat = (I - K @ x_meas.T) @ (xhat - control_u(xhat) ) + (K @ x_meas.T )* z
+        P = (I - np.outer(K, x_meas.ravel())) @ P
 
         est[k] = xhat; tru[k] = xt[k]
         Kh[k] = K; Ptr[k] = np.trace(P); Pxx[k] = P[x_, x_]

@@ -50,7 +50,7 @@ g, k_s, b = 6.0, 6.0, 3.2
 T_, H_, x_, r_, rp_, rpp_ = range(6)
 n = 6
 kx = 6
-sd = 3
+sd = 3 # seed
 Rc = 1.0
 # ----------------------------------------------------------------- 被動動態 Φ
 # 關鍵改動 (A2): 第 6 列 (r'') 不再含 g。
@@ -90,5 +90,5 @@ Q[rpp_, rpp_] = 1e-4       # 極小 regularizer，避免奇異
 # R ≠ 真實 ω 方差，這正是「客觀有雜訊但主觀不知」的 non-Bayesian 宣稱。
 x_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
 sigma_omega2 = qx                                 # 真實感官雜訊方差 (進量測)
-R = np.array([[1e-6]])                             # filter 信念: 自負猴子 R→0
+R = np.array([[1e-6]])                             # filter 信念: 自負猴子 R→0 正常猴子 R = 2.4
 I = np.eye(n)

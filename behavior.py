@@ -45,7 +45,7 @@ def simulate(kx=6, seed=3, return_traces=True):
         z = x_meas @ xt[k] + omega
         S = x_meas @ P @ x_meas.T + R
         K = (P @ x_meas.T @ np.linalg.inv(S)).ravel()
-        xhat = xhat + K * (z - x_meas @ xhat)
+        # xhat = (1 - K) * (xhat - control_u(xhat) ) + K * z
         P = (I - np.outer(K, x_meas.ravel())) @ P
 
         est[k] = xhat
