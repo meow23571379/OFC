@@ -78,7 +78,8 @@ from config import *
 # u = A · x̂，A 只有 (r'', x) 那格 = kx。這裡把回饋增益 kx 參數化，
 # 以便 LQR 一維搜尋最佳 kx。佔位版 = g = 6。
 def make_A(kx):
-    A = np.zeros((n, n)); A[rpp_, x_] = kx
+    A = np.zeros((n, n))
+    A[rpp_, x_] = kx
     return A
 
 # # ----------------------------------------------------------------- 雜訊設定
@@ -114,17 +115,28 @@ def make_A(kx):
 # ----------------------------------------------------------------- 真值產生用的抽樣
 # 為了在「產生真值」時能對 T 加世界擾動、對 x 加感官雜訊 ω，
 # 我們直接抽兩個獨立高斯量: w_T ~ N(0,qT), ω ~ N(0,qx)。
+def noiseN(seed=3):
+    rng = np.random.default_rng(seed)
+    return np.sqrt(sigma_n) * rng.standard_normal(1) # noise
+
 def simulate(kx=g, seed=3, return_traces=True):
     rng = np.random.default_rng(seed)
-    A = make_A(kx)
-    control_u = lambda xhat: A @ xhat
+    L = make_A(kx)
+    control_u = lambda xhat:  L @ xhat # u =  L * x
 
-    xt   = np.zeros((N, n)); xt[0, T_] = 5.0; xt[0, x_] = 5.0
-    xhat = np.zeros(n);      xhat[T_] = 5.0;  xhat[x_] = 5.0
+    xt   = np.zeros((N, n))
+    xt[0, T_] = 5.0
+    xt[0, x_] = 5.0
+    xhat = np.zeros(n) 
+    xhat[T_] = 5.0
+    xhat[x_] = 5.0
     P    = np.diag([sigma_T2, 1., 1., 1., 1., 1.])
 
-    est = np.zeros((N, n)); tru = np.zeros((N, n))
-    Kh  = np.zeros((N, n)); Ptr = np.zeros(N); Pxx = np.zeros(N)
+    est = np.zeros((N, n))
+    tru = np.zeros((N, n))
+    Kh  = np.zeros((N, n))
+    Ptr = np.zeros(N)
+    Pxx = np.zeros(N)
     Utrace = np.zeros(N)
 
     for k in range(N):
@@ -132,30 +144,32 @@ def simulate(kx=g, seed=3, return_traces=True):
         if k > 0:
             u = control_u(xhat)                       # u = A·x̂，6 維向量
             # 被動演化 + 控制輸入 (g 已從 Φ 移出，改由 u = A·x̂ 進入 r'')
-            xt[k] = Phi @ xt[k-1] + u
+            xt[k] = Phi @ xt[k-1] + B @ u
             # 世界擾動: T 加 random-walk 噪音
             wT = np.sqrt(qT) * rng.standard_normal()
             xt[k, T_] = xt[k-1, T_] + wT              # T 是純 random walk
             # v11: 真值 x 保持乾淨的物理量 (T-H)，不再加 ω。
             # 感官雜訊 ω 改在量測那一刻注入 (見下方 z)。
-            xt[k, x_] = xt[k, T_] - xt[k, H_]
+            xt[k, x_] = xt[k, T_] - xt[k, H_] # x_t = T_t - H_t
             Utrace[k] = u[rpp_]
 
         # -------- Kalman 量測更新 (量 x) ---------------------------
         # v11: 感官雜訊 ω 在這裡注入 (用真實 σ_ω²)，但 filter 內部用 R→0。
-        omega = np.sqrt(sigma_omega2) * rng.standard_normal(1)
-        z = H_meas @ xt[k] + omega
-        S = H_meas @ P @ H_meas.T + R
-        K = (P @ H_meas.T @ np.linalg.inv(S)).ravel()
-        xhat = xhat + K * (z - H_meas @ xhat)
-        P = (I - np.outer(K, H_meas.ravel())) @ P
+        omega = np.sqrt(sigma_omega2) * rng.standard_normal(1) # noise
+        z = H_meas @ xt[k] + omega # z_t = y_t = x_t + omega
+        S = H_meas @ P @ H_meas.T + R  # S = HPH^T + R
+        K = (A @ P @ H_meas.T @ np.linalg.inv(S)).ravel() # K = A*P*H^T*S^-1
+        xhat = Phi @ xhat + B @ control_u(xhat) + K * (z - H_meas @ xhat) + noiseN()# x_hat = A*x + B*u + K (y_t - x_hat) + n
+        P = (A - np.outer(K, H_meas.ravel())) @ P @ A.T + Q
 
-        est[k] = xhat; tru[k] = xt[k]
-        Kh[k] = K; Ptr[k] = np.trace(P); Pxx[k] = P[x_, x_]
+        
 
         # -------- Kalman 時間更新 (預測) ---------------------------
-        xhat = Phi @ xhat + control_u(xhat)
-        P = Phi @ P @ Phi.T + Q
+        est[k] = xhat
+        tru[k] = xt[k]
+        Kh[k] = K
+        Ptr[k] = np.trace(P)
+        Pxx[k] = P[x_, x_]
 
     if return_traces:
         return dict(t=np.arange(N)*dt, est=est, tru=tru, Kh=Kh,

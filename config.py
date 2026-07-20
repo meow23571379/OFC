@@ -64,6 +64,8 @@ Phi = np.array([
     [0,  0, 0,  0,   1, dt],   # r' += dt·r''
     [0,  0, 0,-k_s, -b,  0],   # r'' = -k_s·r - b·r'  (+ 控制 u，見下)
 ], float)
+A = Phi
+
 # ----------------------------------------------------------------- 雜訊設定
 # (1) 世界擾動: T 是 random walk，方差 σ_T² · dt (與舊版一致)
 sigma_T2 = 5.68            # deg²  (per unit time)
@@ -72,6 +74,10 @@ qT = sigma_T2 * dt         # 每步 T 的 process variance
 # (2) 感官雜訊 ω: 只作用在 x，代表猴子感官的 steering-error 雜訊
 sigma_x = 0.30             # deg   (感官雜訊標準差；baseline，可掃描)
 qx = sigma_x**2            # deg²
+
+# (2) 感官雜訊 ω: 只作用在 x，代表猴子感官的 steering-error 雜訊
+sigma_n = 0.30             # deg   (感官雜訊標準差；baseline，可掃描)
+qn = sigma_n**2            # deg²
 
 # v11 改動: 感官雜訊 ω 已移到量測層，不再進 Q。
 # Q[x,x] 不再手動繼承 qT/qx；T 的擾動是世界的事，會透過真值 x=T-H
@@ -91,5 +97,14 @@ Q[rpp_, rpp_] = 1e-4       # 極小 regularizer，避免奇異
 x_meas = np.array([[0, 0, 1, 0, 0, 0]], float)   # 只量 x
 H_meas = x_meas
 sigma_omega2 = qx                                 # 真實感官雜訊方差 (進量測)
+sigma_n = qn
 R = np.array([[2.4]])                             # filter 信念: 自負猴子 R→0 原作2.4
 I = np.eye(n)
+B = np.array([
+    [1,  0,  0,  0,  0,  0],   
+    [0,  1,  0,  0,  0,  0],   
+    [0,  0,  1,  0,  0,  0],   
+    [0,  0,  0,  1,  0,  0],   
+    [0,  0,  0,  0,  1,  0],   
+    [0,  0,  0,  0,  0,  1],   
+], float)
