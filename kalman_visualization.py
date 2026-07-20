@@ -309,76 +309,114 @@ def fig4_rc_spectrum(n_seeds=20, n_kx=60):
     print("FIG4 ->", p, f"(g={G:g} @ Rc≈{Rc_at_g:.2e})")
     return p
 
-def fig5_panels():
-    # ===========================================================================
-    # FIGURE
-    # ===========================================================================
-    fig = plt.figure(figsize=(15, 11))
-    gs = fig.add_gridspec(3, 4, hspace=0.42, wspace=0.32)
+def fig5_panels(seed=3):
+    """
+    FIG 5 — Kalman Gain K 時間分布
+    ====================================================================
+    K 是 6 維向量（每個 state 對應一個 gain），來自單一純量量測 z（只量 x）。
+    更新公式: x̂_new = x̂_old + K*(z - H·x̂_old)
+    K[i] = P[i,x] / S,  S = P[x,x] + R
 
-    # Row 1: the four state estimates vs truth
-    for j in range(4):
-        ax = fig.add_subplot(gs[0, j])
-        ax.plot(t, x_true[:, j], 'k-', lw=1.8, label="true")
-        ax.plot(t, est[:, j], 'b-', lw=1.3, label="estimate")
-        ax.set_title(names[j], fontsize=10)
-        ax.set_xlabel("time (s)")
-        ax.grid(alpha=0.3)
-        if j == 0:
-            ax.legend(fontsize=8, loc="upper right")
+    物理意義:
+      K[x]  ≈ 1  → x 直接被量，幾乎完全相信量測
+      K[T]  ≈ 1  → filter 從 x 推斷 T（因 P[T,x] ≈ P[x,x]，T 與 x 高度相關）
+      K[H,r,r',r''] ≈ 0 → 與 x 量測幾乎不相關，幾乎不更新
 
-    # Row 2 (left two): Kalman gain components + trace(P)
-    axK = fig.add_subplot(gs[1, 0:2])
-    state_lbl = ["X", "r", "r'", "r''"]
-    for j in range(n):
-        axK.plot(t, Khist[:, j, 0], label=fr"$K_{{{state_lbl[j]},X}}$")
-    axK.set_title("Kalman gain — gain applied to the error ($X$) measurement", fontsize=10)
-    axK.set_xlabel("time (s)"); axK.set_ylabel("gain"); axK.grid(alpha=0.3)
-    axK.legend(fontsize=8, ncol=2)
+    Layout:
+      Row 1 (full): 所有 6 個 K 疊圖（說明量測如何分配到各 state）
+      Row 2: K[x] vs K[T] — 主要 gain pair，穩態均 ≈ 1
+      Row 3: K[H], K[r], K[r'], K[r''] — 穩態均 ≈ 0
+    ====================================================================
+    """
+    import matplotlib.ticker as mticker
+    import matplotlib.gridspec as mgridspec
 
-    axP = fig.add_subplot(gs[1, 2:4])
-    axP.plot(t, Ptr, 'g-', lw=2)
-    axP.axvline(CLAMP_STEP*dt, color='gray', ls='--', lw=1)
-    axP.set_title(r"Trace of covariance $P_k$ (total estimator uncertainty)", fontsize=10)
-    axP.set_xlabel("time (s)"); axP.set_ylabel(r"$\mathrm{tr}(P_k)$"); axP.grid(alpha=0.3)
+    d    = current_ver.simulate(kx=G, seed=seed)
+    t    = d["t"]
+    Kh   = d["Kh"]   # (N, 6)  — K[i] at each time step
 
-    # Row 3: DISTRIBUTION of each X_hat component, given clamped X
-    for j in range(4):
-        ax = fig.add_subplot(gs[2, j])
-        data = mc[:, j]
-        ax.hist(data, bins=45, density=True, color='steelblue', alpha=0.75,
-                edgecolor='white', linewidth=0.3)
-        mu, sd = data.mean(), data.std()
-        xs = np.linspace(data.min(), data.max(), 200)
-        ax.plot(xs, np.exp(-0.5*((xs-mu)/sd)**2)/(sd*np.sqrt(2*np.pi)),
-                'r-', lw=1.6)
-        ax.axvline(mu, color='red', ls='-', lw=1.2)
-        if j == 0:
-            ax.axvline(X_COND, color='k', ls='--', lw=1.4, label=f"true X={X_COND}")
-            ax.legend(fontsize=8)
-        ax.set_title(f"dist. of est. {state_lbl[j]}\n$\\mu$={mu:.2f}, $\\sigma$={sd:.2f}",
-                     fontsize=9)
-        ax.set_xlabel("estimated value"); ax.set_ylabel("density")
-        ax.grid(alpha=0.3)
+    s_labels = [r"$K_{T}$",  r"$K_{H}$",  r"$K_{x}$",
+                r"$K_{r}$",  r"$K_{r'}$", r"$K_{r''}$"]
+    s_desc   = ["T (inferred from x)",
+                "H (near zero)",
+                "x (directly measured)",
+                "r (near zero)",
+                "r' (near zero)",
+                "r'' (near zero)"]
+    idx_list = [T_, H_, x_, r_, rp_, rpp_]
+    colors6  = [C_TEAL, C_RUST, C_DARK, C_GOLD, C_GRAY, "#9B59B6"]
 
-    fig.suptitle("Kalman steering model — augmented state $\\hat{X}=[X,\\,r,\\,r',\\,r'']$\n"
-                 f"Bottom row: distribution of $\\hat{{X}}$ given the input clamped to X={X_COND} "
-                 f"(Monte-Carlo, n={n_mc})", fontsize=12)
-    fig.savefig("/home/user/workspace/kalman_steering_results.png", dpi=135,
-                bbox_inches="tight")
+    fig = plt.figure(figsize=(13, 11))
+    outer = mgridspec.GridSpec(3, 1, figure=fig, hspace=0.55,
+                               top=0.92, bottom=0.07, left=0.09, right=0.97)
 
-    # --- console summary ---
-    print("=== Augmented state X_hat = [X, r, r', r''] ===")
-    print("Phi=\n", Phi)
-    print("H=\n", H)
-    print("Q diag=", np.diag(Q))
-    print("R diag=", np.diag(R))
-    print("steady-state gain (last step), columns=[meas X, meas r]:\n", Khist[-1])
-    print("steady-state trace(P):", Ptr[-1])
-    print()
-    print(f"Given clamped true X = {X_COND}:")
-    for j in range(4):
-        print(f"  est {state_lbl[j]:>3}: mean={mc[:,j].mean():+.3f}  std={mc[:,j].std():.3f}")
+    # ---- Row 1: overlay — all 6 K ----
+    ax_all = fig.add_subplot(outer[0])
+    for i, idx in enumerate(idx_list):
+        ax_all.plot(t, Kh[:, idx], color=colors6[i], lw=1.6, label=s_labels[i])
+    ax_all.axhline(0, color="gray", lw=0.7, ls="--", alpha=0.5)
+    ax_all.set_ylabel("K (gain)", fontsize=11)
+    ax_all.set_title(
+        f"[{VER}]  (a) Kalman gain K over time — one scalar measurement z = x + \u03c9\n"
+        r"$K_i = P_{i,x}\,/\,S$ : how much each state estimate is corrected by the x measurement",
+        fontsize=10)
+    ax_all.legend(ncol=6, fontsize=9, framealpha=0.9,
+                  loc="upper center", bbox_to_anchor=(0.5, -0.2))
+    ax_all.spines[["top", "right"]].set_visible(False)
+    ax_all.grid(lw=0.4, alpha=0.35, color="lightgray")
+    ax_all.set_xlim([0, t[-1]])
+    ax_all.set_ylim([-0.35, 1.15])
+
+    # ---- Row 2: K[x] and K[T] — the dominant pair ----
+    inner2 = mgridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=outer[1], wspace=0.32)
+
+    pairs = [(x_, r"$K_x$  (directly measured state)",   C_DARK),
+             (T_, r"$K_T$  (inferred: $P_{T,x}\approx P_{x,x}$)", C_TEAL)]
+    for col, (idx, title, col_c) in enumerate(pairs):
+        ax = fig.add_subplot(inner2[col])
+        ss = float(Kh[-50:, idx].mean())
+        ax.plot(t, Kh[:, idx], color=col_c, lw=1.8)
+        ax.axhline(ss, color=col_c, lw=1.0, ls=":", alpha=0.8,
+                   label=f"ss = {ss:.4f}")
+        ax.axhline(0,  color="gray", lw=0.7, ls="--", alpha=0.5)
+        ax.set_title(f"(b) {title}", fontsize=9)
+        ax.set_ylabel("K", fontsize=10)
+        ax.legend(fontsize=8, loc="lower right")
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(lw=0.4, alpha=0.35, color="lightgray")
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=4, prune="both"))
+        ax.set_xlim([0, t[-1]])
+
+    # ---- Row 3: the near-zero gains ----
+    inner3 = mgridspec.GridSpecFromSubplotSpec(1, 4, subplot_spec=outer[2], wspace=0.42)
+    minor = [(H_,   r"$K_H$",    C_RUST,    "(c)"),
+             (r_,   r"$K_r$",    C_GOLD,    "(d)"),
+             (rp_,  r"$K_{r'}$", C_GRAY,    "(e)"),
+             (rpp_, r"$K_{r''}$","#9B59B6",  "(f)")]
+    for col, (idx, lbl, col_c, plbl) in enumerate(minor):
+        ax = fig.add_subplot(inner3[col])
+        ss = float(Kh[-50:, idx].mean())
+        ax.plot(t, Kh[:, idx], color=col_c, lw=1.5)
+        ax.axhline(ss, color=col_c, lw=1.0, ls=":", alpha=0.8)
+        ax.axhline(0,  color="gray", lw=0.7, ls="--", alpha=0.5)
+        ax.set_title(f"{plbl} {lbl}\nss={ss:.1e}", fontsize=9)
+        ax.set_ylabel(lbl, fontsize=9)
+        ax.set_xlabel("Time (s)", fontsize=9)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(lw=0.4, alpha=0.35, color="lightgray")
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=3, prune="both"))
+        ax.set_xlim([0, t[-1]])
+
+    p = _outp("fig5_K_panels")
+    fig.savefig(p, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"FIG5 -> {p}")
+    print("  K_i = P[i,x] / S  (single scalar measurement: z = x + omega)")
+    for i, idx in enumerate(idx_list):
+        ss = float(Kh[-50:, idx].mean())
+        print(f"    {s_labels[i]:12s}  ss = {ss:.6f}   ({s_desc[i]})")
+    return p
 
 # ==================================================================
 # 一次跑出所有圖
